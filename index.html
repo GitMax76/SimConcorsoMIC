@@ -1,0 +1,462 @@
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulatore Concorso MiC - Ufficiale</title>
+    
+    <!-- Librerie -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fadeIn 0.5s ease-out forwards; }
+        .loader { border: 3px solid #f3f3f3; border-radius: 50%; border-top: 3px solid #3498db; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const TARGET_DB_FILE = 'db_concorso_massivo.json';
+
+        // --- ICONE ---
+        const Icon = ({ p, c }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={c}>{p}</svg>;
+        const Check = (p) => <Icon c={p.className} p={<polyline points="20 6 9 17 4 12"/>} />;
+        const Alert = (p) => <Icon c={p.className} p={<g><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></g>} />;
+        const Refresh = (p) => <Icon c={p.className} p={<g><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></g>} />;
+        const BookOpen = (p) => <Icon c={p.className} p={<g><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g>} />;
+        const Play = (p) => <Icon c={p.className} p={<polygon points="5 3 19 12 5 21 5 3"/>} />;
+        const DatabaseIcon = (p) => <Icon c={p.className} p={<g><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></g>} />;
+
+        // --- UTILITY ---
+        const shuffle = (array) => [...array].sort(() => Math.random() - 0.5);
+        
+        const shuffleOpt = (q) => {
+            if (!q.options || !Array.isArray(q.options)) return q;
+            
+            // Per i situazionali e logica, mescoliamo le opzioni ma dobbiamo tracciare
+            // dove finiscono la risposta corretta e quella neutra.
+            const indices = q.options.map((_, i) => i);
+            const shufIdx = shuffle(indices);
+            
+            const newCorrect = shufIdx.indexOf(q.correct);
+            // Se esiste una risposta neutra (nei situazionali), troviamo il suo nuovo indice
+            const newNeutral = (q.neutral !== undefined) ? shufIdx.indexOf(q.neutral) : undefined;
+
+            return { 
+                ...q, 
+                options: shufIdx.map(i => q.options[i]), 
+                correct: newCorrect,
+                neutral: newNeutral
+            };
+        };
+
+        // --- CATEGORIZZAZIONE BANDO ---
+        const getCategoryGroup = (cat) => {
+            const c = cat.toLowerCase();
+            
+            // 1. SITUAZIONALI (8 quesiti)
+            if (c.includes('situazionali') || c.includes('comportamento')) return 'situational';
+            
+            // 2. LOGICA (7 quesiti)
+            if (c.includes('logica') || c.includes('ragionamento') || c.includes('deduttiva')) return 'logic';
+            
+            // 3. SPECIFICHE (15 quesiti)
+            // Sicurezza, Marketing, Patrimonio, Ministero
+            if (c.includes('sicurezza') || c.includes('marketing') || c.includes('patrimonio') || 
+                c.includes('ministero') || c.includes('mic') || c.includes('beni culturali') || c.includes('tutela')) return 'specific';
+            
+            // 4. GENERALI (10 quesiti) - Tutto il resto
+            return 'general';
+        };
+
+        function App() {
+            const [gameState, setGameState] = useState('loading'); 
+            const [database, setDatabase] = useState([]);
+            const [dbStatus, setDbStatus] = useState({ loaded: false, message: "Inizializzazione...", count: 0 });
+            
+            // Configurazione Allenamento
+            const [selectedSubject, setSelectedSubject] = useState('all');
+            const [selectedDifficulty, setSelectedDifficulty] = useState('all'); // Aggiunto stato difficoltà
+            const [questionCount, setQuestionCount] = useState(20);
+
+            // Stato Partita
+            const [currentQuestions, setCurrentQuestions] = useState([]);
+            const [idx, setIdx] = useState(0);
+            const [answers, setAnswers] = useState({}); // { questionIdx: selectedOptionIdx }
+            const [showFeedback, setShowFeedback] = useState(false);
+            const [testMode, setTestMode] = useState(''); 
+            const [isSimulation, setIsSimulation] = useState(false);
+
+            // --- CARICAMENTO ---
+            useEffect(() => {
+                const loadDB = async () => {
+                    setDbStatus({ loaded: false, message: `Ricerca ${TARGET_DB_FILE}...`, count: 0 });
+                    try {
+                        const response = await fetch(`./${TARGET_DB_FILE}`);
+                        if (!response.ok) throw new Error("File non trovato");
+                        const json = await response.json();
+                        if (Array.isArray(json) && json.length > 0) {
+                            setDatabase(json);
+                            setDbStatus({ loaded: true, message: "Pronto", count: json.length });
+                            setGameState('menu');
+                        } else {
+                            throw new Error("JSON non valido");
+                        }
+                    } catch (err) {
+                        setDbStatus({ loaded: false, message: "Carica il file JSON manualmente", count: 0 });
+                        setGameState('menu');
+                    }
+                };
+                loadDB();
+            }, []);
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const json = JSON.parse(ev.target.result);
+                        if (Array.isArray(json)) {
+                            setDatabase(json);
+                            setDbStatus({ loaded: true, message: "Caricato", count: json.length });
+                        }
+                    } catch (ex) { alert("File non valido"); }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- AVVIO PARTITA ---
+            
+            const startSimulation = () => {
+                // SUDDIVISIONE RIGIDA DA BANDO
+                const poolSituational = database.filter(q => getCategoryGroup(q.category) === 'situational');
+                const poolLogic = database.filter(q => getCategoryGroup(q.category) === 'logic');
+                const poolSpecific = database.filter(q => getCategoryGroup(q.category) === 'specific');
+                const poolGeneral = database.filter(q => getCategoryGroup(q.category) === 'general');
+
+                // Alert informativo se mancano domande (per debug)
+                const report = `Disponibili:\nGenerali: ${poolGeneral.length}/10\nSpecifiche: ${poolSpecific.length}/15\nLogica: ${poolLogic.length}/7\nSituazionali: ${poolSituational.length}/8`;
+                console.log(report);
+
+                if (poolGeneral.length < 10 || poolSpecific.length < 15 || poolLogic.length < 7 || poolSituational.length < 8) {
+                    alert(`Attenzione: Il database non è completo per una simulazione esatta.\n${report}\n\nAvvio la simulazione con i quesiti disponibili.`);
+                }
+
+                const setGeneral = shuffle(poolGeneral).slice(0, 10);
+                const setSpecific = shuffle(poolSpecific).slice(0, 15);
+                const setLogic = shuffle(poolLogic).slice(0, 7);
+                const setSituational = shuffle(poolSituational).slice(0, 8);
+
+                // Ordine: Generali -> Specifiche -> Logica -> Situazionali
+                const finalSet = [...setGeneral, ...setSpecific, ...setLogic, ...setSituational];
+                
+                startGameLogic(finalSet, 'Simulazione Concorso (40 Quesiti)', true);
+            };
+
+            const startTraining = () => {
+                let pool = database;
+                
+                // Filtro Materia
+                if (selectedSubject !== 'all') {
+                    pool = pool.filter(q => q.category === selectedSubject);
+                }
+
+                // Filtro Difficoltà
+                if (selectedDifficulty !== 'all') {
+                    pool = pool.filter(q => q.difficulty === selectedDifficulty);
+                }
+
+                const finalSet = shuffle(pool).slice(0, questionCount);
+                if (finalSet.length === 0) { 
+                    alert("Nessuna domanda trovata con i filtri selezionati (Materia/Difficoltà)."); 
+                    return; 
+                }
+                
+                const diffLabel = selectedDifficulty === 'all' ? '' : `(${selectedDifficulty})`;
+                startGameLogic(finalSet, `Allenamento Mirato ${diffLabel}`, false);
+            };
+
+            const startGameLogic = (questions, modeName, simulation) => {
+                const gameSet = questions.map(shuffleOpt);
+                setCurrentQuestions(gameSet);
+                setTestMode(modeName);
+                setIsSimulation(simulation);
+                setIdx(0);
+                setAnswers({});
+                setShowFeedback(false);
+                setGameState('playing');
+            };
+
+            // --- GESTIONE RISPOSTE ---
+            const handleAnswer = (optIdx) => {
+                if (showFeedback) return;
+                
+                setAnswers(prev => ({ ...prev, [idx]: optIdx }));
+                setShowFeedback(true);
+            };
+
+            const nextQuestion = () => {
+                if (idx < currentQuestions.length - 1) {
+                    setIdx(i => i + 1);
+                    setShowFeedback(false);
+                } else {
+                    setGameState('results');
+                }
+            };
+
+            // --- CALCOLO PUNTEGGIO ---
+            const calculateResults = () => {
+                let totalScore = 0;
+                let correctCount = 0;
+                let situationalDetails = { effective: 0, neutral: 0, ineffective: 0 };
+
+                currentQuestions.forEach((q, i) => {
+                    const userAns = answers[i];
+                    const group = getCategoryGroup(q.category);
+                    const isAnswered = userAns !== undefined;
+
+                    if (group === 'situational') {
+                        // QUESITI SITUAZIONALI (8 finali)
+                        // Punteggi: +0.75 (Efficace), +0.375 (Neutra), 0 (Meno efficace/Omessa)
+                        if (isAnswered) {
+                            if (userAns === q.correct) {
+                                totalScore += 0.75;
+                                situationalDetails.effective++;
+                            } else if (q.neutral !== undefined && userAns === q.neutral) {
+                                totalScore += 0.375;
+                                situationalDetails.neutral++;
+                            } else {
+                                totalScore += 0;
+                                situationalDetails.ineffective++;
+                            }
+                        }
+                    } else {
+                        // QUESITI STANDARD + LOGICA (32 iniziali)
+                        // Punteggi: +0.75 (Esatta), 0 (Omessa), -0.25 (Errata)
+                        if (isAnswered) {
+                            if (userAns === q.correct) {
+                                totalScore += 0.75;
+                                correctCount++;
+                            } else {
+                                totalScore -= 0.25; // Penalità
+                            }
+                        }
+                        // Omessa = 0 (implicito)
+                    }
+                });
+
+                // Arrotondamento a 2 decimali per evitare 21.0000004
+                totalScore = Math.round(totalScore * 1000) / 1000;
+                
+                return { totalScore, correctCount, situationalDetails, passed: totalScore >= 21 };
+            };
+
+            // --- RENDER ---
+            if (gameState === 'loading') return <div className="min-h-screen flex items-center justify-center"><div className="loader"></div></div>;
+
+            if (gameState === 'menu') {
+                const categories = Array.from(new Set(database.map(q => q.category))).sort();
+                
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-50 font-sans">
+                        <div className="max-w-4xl w-full text-center">
+                            <div className="bg-slate-900 w-20 h-20 rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-xl">
+                                <BookOpen className="w-10 h-10 text-white" />
+                            </div>
+                            <h1 className="text-4xl font-extrabold text-slate-900 mb-2">Simulatore Concorso MiC</h1>
+                            <p className="text-slate-500 mb-8">Piattaforma Ufficiale - Funzionari e Assistenti</p>
+
+                            {!dbStatus.loaded ? (
+                                <div className="bg-white p-8 rounded-2xl shadow border">
+                                    <label className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold cursor-pointer inline-flex items-center gap-2">
+                                        <DatabaseIcon className="w-5 h-5"/> Carica DB Domande
+                                        <input type="file" onChange={handleFileUpload} accept=".json" className="hidden" />
+                                    </label>
+                                </div>
+                            ) : (
+                                <div className="grid md:grid-cols-2 gap-6 text-left">
+                                    {/* SIMULAZIONE */}
+                                    <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-emerald-100 hover:border-emerald-400 transition-all">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Check className="w-6 h-6"/></div>
+                                            <h2 className="text-xl font-bold text-slate-800">Simulazione Bando</h2>
+                                        </div>
+                                        <div className="text-xs text-slate-600 mb-6 bg-slate-50 p-3 rounded-lg space-y-2">
+                                            <p>• <b>10</b> Quesiti Generali (Diritto, Inglese, Inf...)</p>
+                                            <p>• <b>15</b> Quesiti Specifici (Sicurezza, MiC...)</p>
+                                            <p>• <b>7</b> Quesiti Logica</p>
+                                            <p>• <b>8</b> Quesiti Situazionali</p>
+                                            <div className="border-t pt-2 mt-2">
+                                                <p className="font-bold text-emerald-700">Totale: 40 Quesiti | 30 Punti</p>
+                                                <p className="text-[10px] opacity-70">Soglia superamento: 21/30</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={startSimulation} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold flex justify-center gap-2">
+                                            <Play className="w-4 h-4"/> Inizia Prova
+                                        </button>
+                                    </div>
+
+                                    {/* ALLENAMENTO */}
+                                    <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-blue-100 hover:border-blue-400 transition-all">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Refresh className="w-6 h-6"/></div>
+                                            <h2 className="text-xl font-bold text-slate-800">Allenamento</h2>
+                                        </div>
+                                        <div className="space-y-3 mb-6">
+                                            {/* Selettore Materia */}
+                                            <select className="w-full p-2 border rounded-lg text-sm bg-white" value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)}>
+                                                <option value="all">Materia: Mista</option>
+                                                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                            
+                                            {/* Selettore Difficoltà */}
+                                            <select className="w-full p-2 border rounded-lg text-sm bg-white" value={selectedDifficulty} onChange={e => setSelectedDifficulty(e.target.value)}>
+                                                <option value="all">Difficoltà: Mista</option>
+                                                <option value="easy">Base (Easy)</option>
+                                                <option value="medium">Intermedio (Medium)</option>
+                                                <option value="hard">Avanzato (Hard)</option>
+                                            </select>
+
+                                            {/* Selettore Quantità */}
+                                            <div className="flex gap-2">
+                                                {[10, 20, 50].map(n => (
+                                                    <button key={n} onClick={() => setQuestionCount(n)} className={`flex-1 py-1 border rounded text-sm ${questionCount===n ? 'bg-blue-600 text-white' : 'bg-white'}`}>{n}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <button onClick={startTraining} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold flex justify-center gap-2">
+                                            <Play className="w-4 h-4"/> Avvia Rapido
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            <p className="mt-8 text-xs text-slate-400">Database: {dbStatus.count} quiz</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'playing') {
+                const cur = currentQuestions[idx];
+                const group = getCategoryGroup(cur.category);
+                
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100 p-4">
+                        <div className="max-w-2xl w-full">
+                            <div className="flex justify-between items-center mb-4 text-sm font-medium text-slate-500">
+                                <span className="bg-white px-3 py-1 rounded shadow-sm">{testMode}</span>
+                                <span>{idx + 1}/{currentQuestions.length}</span>
+                            </div>
+                            
+                            <div className="bg-white rounded-3xl shadow-xl overflow-hidden animate-in">
+                                <div className="h-1 bg-slate-100 w-full"><div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${((idx+1)/currentQuestions.length)*100}%`}}></div></div>
+                                
+                                <div className="p-8">
+                                    <div className="mb-6">
+                                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wider mb-2 inline-block ${group==='situational' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-600'}`}>
+                                            {cur.category} {group==='situational' ? '(Situazionale)' : ''}
+                                        </span>
+                                        <h2 className="text-lg font-bold text-slate-900 leading-snug">{cur.text}</h2>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {cur.options.map((opt, i) => {
+                                            let style = "border-slate-200 hover:bg-slate-50";
+                                            // Feedback visivo immediato (utile per allenamento, mantenuto anche in simulazione per review istantanea)
+                                            if (showFeedback) {
+                                                if (i === cur.correct) style = "border-emerald-500 bg-emerald-50 text-emerald-900 font-bold"; // +0.75
+                                                else if (group === 'situational' && i === cur.neutral) style = "border-amber-400 bg-amber-50 text-amber-900"; // +0.375
+                                                else if (i === answers[idx]) style = "border-red-500 bg-red-50 text-red-900"; // Errata/Meno efficace
+                                                else style = "border-slate-100 opacity-50";
+                                            }
+                                            return (
+                                                <button key={i} onClick={() => handleAnswer(i)} disabled={showFeedback} 
+                                                    className={`w-full text-left p-4 rounded-xl border-2 transition-all flex items-center ${style}`}>
+                                                    <div className="w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold mr-3">{String.fromCharCode(65+i)}</div>
+                                                    {opt}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {showFeedback && (
+                                        <div className="mt-6 pt-6 border-t animate-in">
+                                            <div className="bg-slate-50 p-4 rounded-lg mb-4 text-sm text-slate-700">
+                                                <span className="font-bold block mb-1">Spiegazione:</span> {cur.explanation}
+                                                {group === 'situational' && (
+                                                    <div className="mt-2 text-xs text-slate-500">
+                                                        <span className="text-emerald-600 font-bold">Verde:</span> Più efficace (+0.75) | 
+                                                        <span className="text-amber-600 font-bold ml-2">Giallo:</span> Neutra (+0.375)
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <button onClick={nextQuestion} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">
+                                                {idx < currentQuestions.length - 1 ? 'Prossima' : 'Concludi'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'results') {
+                const results = calculateResults();
+                const scoreClass = results.passed ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-red-600 bg-red-50 border-red-200';
+
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100 p-4">
+                        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden p-8 text-center animate-in">
+                            <h2 className="text-2xl font-bold text-slate-800 mb-6">Risultato Prova</h2>
+                            
+                            {isSimulation ? (
+                                <div className={`p-6 rounded-2xl border-2 mb-6 ${scoreClass}`}>
+                                    <p className="text-xs font-bold uppercase tracking-wider mb-1">Punteggio Totale</p>
+                                    <p className="text-5xl font-extrabold mb-2">{results.totalScore}<span className="text-2xl text-opacity-50">/30</span></p>
+                                    <div className="font-bold text-lg">{results.passed ? "SUPERATO" : "NON SUPERATO"}</div>
+                                    <p className="text-xs mt-2 opacity-80">Soglia minima: 21/30</p>
+                                </div>
+                            ) : (
+                                <div className="p-6 rounded-2xl bg-blue-50 border-2 border-blue-200 mb-6 text-blue-800">
+                                    <p className="text-xs font-bold uppercase tracking-wider mb-1">Risposte Corrette</p>
+                                    <p className="text-4xl font-extrabold">{results.correctCount}<span className="text-xl opacity-60">/{currentQuestions.length}</span></p>
+                                    <p className="text-xs mt-2">Modalità allenamento (senza penalità)</p>
+                                </div>
+                            )}
+
+                            {isSimulation && (
+                                <div className="text-left text-xs text-slate-500 mb-8 space-y-2 bg-slate-50 p-4 rounded-xl">
+                                    <p><strong>Dettaglio Punteggio:</strong></p>
+                                    <p>• Standard/Logica (32): <b>+0.75</b> (ok) / <b>-0.25</b> (err) / <b>0</b> (omessa)</p>
+                                    <p>• Situazionali (8):</p> 
+                                    <ul className="pl-4 list-disc">
+                                        <li>Più efficace: <b>{results.situationalDetails.effective}</b> (+0.75)</li>
+                                        <li>Neutra: <b>{results.situationalDetails.neutral}</b> (+0.375)</li>
+                                        <li>Meno efficace: <b>{results.situationalDetails.ineffective}</b> (0)</li>
+                                    </ul>
+                                </div>
+                            )}
+
+                            <button onClick={() => setGameState('menu')} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Torna al Menu</button>
+                        </div>
+                    </div>
+                );
+            }
+            return null;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
