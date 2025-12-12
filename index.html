@@ -1,0 +1,317 @@
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulatore Concorso MiC - Portable</title>
+    
+    <!-- Librerie caricate via CDN per rendere il file portatile e leggero -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    
+    <style>
+        /* Animazioni custom fluide */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- ICONE SVG INTEGRATE (Lucide style) ---
+        // Definiamo i componenti icona manualmente per evitare dipendenze npm
+        const IconWrapper = ({ children, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {children}
+            </svg>
+        );
+
+        const BookOpen = ({ className }) => <IconWrapper className={className}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></IconWrapper>;
+        const CheckCircle = ({ className }) => <IconWrapper className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconWrapper>;
+        const XCircle = ({ className }) => <IconWrapper className={className}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></IconWrapper>;
+        const Clock = ({ className }) => <IconWrapper className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></IconWrapper>;
+        const Play = ({ className }) => <IconWrapper className={className}><polygon points="5 3 19 12 5 21 5 3"/></IconWrapper>;
+        const RefreshCw = ({ className }) => <IconWrapper className={className}><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></IconWrapper>;
+        const Award = ({ className }) => <IconWrapper className={className}><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></IconWrapper>;
+        const Shield = ({ className }) => <IconWrapper className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></IconWrapper>;
+        const Landmark = ({ className }) => <IconWrapper className={className}><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></IconWrapper>;
+        const Star = ({ className }) => <IconWrapper className={className}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></IconWrapper>;
+        const GraduationCap = ({ className }) => <IconWrapper className={className}><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 0 6-1 6-1"/></IconWrapper>;
+        const BrainCircuit = ({ className }) => <IconWrapper className={className}><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.97-1.375"/><path d="M17.97 16.625A4.002 4.002 0 0 1 18 18"/></IconWrapper>;
+
+        // --- DATABASE DOMANDE ---
+        const databaseDomande = [
+            // PRINCIPIANTE
+            { id: 1, difficulty: 'easy', section: 'generale', category: 'Diritto Amministrativo', text: "Qual è il termine ordinario per la conclusione del procedimento amministrativo (L. 241/90)?", options: ["30 giorni", "60 giorni", "90 giorni", "10 giorni"], correct: 0, explanation: "Art. 2 L. 241/90: ove non diversamente stabilito, il termine è di 30 giorni." },
+            { id: 2, difficulty: 'easy', section: 'generale', category: 'Codice Contratti', text: "Nel nuovo Codice dei Contratti (D.Lgs 36/2023), cosa si intende per RUP?", options: ["Responsabile Unico del Progetto", "Responsabile Unico del Procedimento", "Referente Ufficio Pubblico", "Revisore Unico Prezzi"], correct: 0, explanation: "Il D.Lgs 36/2023 ha rinominato la figura in Responsabile Unico del Progetto (art. 15)." },
+            { id: 3, difficulty: 'easy', section: 'generale', category: 'GDPR', text: "Cosa si intende per 'Dato personale'?", options: ["Qualsiasi informazione riguardante una persona fisica identificata o identificabile", "Solo i dati sanitari", "Solo il codice fiscale", "I dati delle persone giuridiche"], correct: 0, explanation: "Art. 4 GDPR: qualsiasi informazione che riguarda una persona fisica identificata o identificabile." },
+            { id: 4, difficulty: 'easy', section: 'specifica', category: 'Sicurezza 81/08', text: "Chi ha l'obbligo indelegabile di redigere il DVR?", options: ["Il Datore di Lavoro", "Il Medico Competente", "L'RLS", "Il Preposto"], correct: 0, explanation: "La valutazione dei rischi e la stesura del DVR sono obblighi non delegabili del Datore di Lavoro." },
+            { id: 5, difficulty: 'easy', section: 'specifica', category: 'MiC', text: "Chi è al vertice politico del Ministero della Cultura?", options: ["Il Ministro", "Il Segretario Generale", "Il Capo Dipartimento", "Il Direttore Generale Musei"], correct: 0, explanation: "Il Ministro è l'organo di indirizzo politico-amministrativo." },
+            
+            // AVANZATO
+            { id: 20, difficulty: 'medium', section: 'generale', category: 'Diritto Amministrativo', text: "Il preavviso di rigetto (art. 10-bis L. 241/90) si applica:", options: ["Solo nei procedimenti ad istanza di parte", "In tutti i procedimenti, anche d'ufficio", "Solo nei procedimenti disciplinari", "Mai, è stato abrogato"], correct: 0, explanation: "L'art. 10-bis si applica solo ai procedimenti ad istanza di parte, comunicando i motivi ostativi all'accoglimento prima del provvedimento finale." },
+            { id: 21, difficulty: 'medium', section: 'generale', category: 'Codice Contratti', text: "L'affidamento diretto per lavori, secondo il D.Lgs 36/2023, è consentito per importi:", options: ["Inferiori a 150.000 euro", "Inferiori a 40.000 euro", "Inferiori a 5.382.000 euro", "Fino a 1 milione di euro"], correct: 0, explanation: "Art. 50 D.Lgs 36/2023: l'affidamento diretto è ammesso per lavori di importo inferiore a 150.000 euro." },
+            { id: 22, difficulty: 'medium', section: 'generale', category: 'Diritto Penale', text: "Qual è l'elemento distintivo tra Peculato (314 c.p.) e Peculato d'uso?", options: ["Nel peculato d'uso l'appropriazione è momentanea con immediata restituzione", "Il peculato d'uso riguarda solo beni immobili", "Il peculato d'uso è punito più gravemente", "Non esiste il peculato d'uso"], correct: 0, explanation: "Il peculato d'uso (art. 314 c.2) si ha quando il colpevole ha agito al solo scopo di fare uso momentaneo della cosa, e questa è immediatamente restituita." },
+            { id: 23, difficulty: 'medium', section: 'specifica', category: 'Patrimonio Culturale', text: "La 'Verifica dell'interesse culturale' (art. 12 D.Lgs 42/2004) riguarda:", options: ["I beni appartenenti a Stato, Regioni, Enti Pubblici o persone giuridiche private senza fine di lucro", "Solo i beni di privati cittadini", "Tutti i beni immobili d'Italia", "Solo i quadri d'autore"], correct: 0, explanation: "La verifica serve a stabilire se i beni di autori non viventi (da oltre 70 anni) di proprietà pubblica presentino interesse culturale." },
+            { id: 24, difficulty: 'medium', section: 'specifica', category: 'Sicurezza 81/08', text: "La Riunione Periodica della sicurezza (art. 35) è obbligatoria annualmente:", options: ["Nelle aziende con più di 15 lavoratori", "In tutte le aziende", "Solo nei cantieri edili", "Nelle aziende con più di 50 lavoratori"], correct: 0, explanation: "L'art. 35 prevede l'obbligo di riunione periodica almeno una volta l'anno nelle unità con più di 15 lavoratori." },
+
+            // ESPERTO
+            { id: 40, difficulty: 'hard', section: 'generale', category: 'Codice Contratti', text: "In tema di 'Soccorso Istruttorio' (art. 101 D.Lgs 36/2023), la mancata integrazione della documentazione nel termine assegnato comporta:", options: ["L'esclusione dalla gara", "Una sanzione pecuniaria ma non l'esclusione", "L'assegnazione di un ulteriore termine di 5 giorni", "La retrocessione in graduatoria"], correct: 0, explanation: "L'art. 101 c. 4 stabilisce chiaramente che la mancata integrazione nel termine perentorio assegnato comporta l'esclusione." },
+            { id: 41, difficulty: 'hard', section: 'generale', category: 'Diritto Amministrativo', text: "La 'SCIA' (Segnalazione Certificata di Inizio Attività) sostituisce:", options: ["Ogni atto di autorizzazione il cui rilascio dipenda esclusivamente dall'accertamento di requisiti e presupposti richiesti dalla legge", "Solo i permessi di costruire", "Solo le licenze commerciali", "I provvedimenti discrezionali della PA"], correct: 0, explanation: "Art. 19 L. 241/90: la SCIA sostituisce atti vincolati, non discrezionali, dove non ci sono limiti contingenti o strumenti di programmazione." },
+            { id: 42, difficulty: 'hard', section: 'generale', category: 'Lavoro Pubblico', text: "Il dipendente pubblico che esercita un'attività lavorativa extra-istituzionale senza autorizzazione (art. 53 D.Lgs 165/2001):", options: ["È soggetto a sanzione disciplinare e deve versare il compenso indebito sul fondo produttività dell'amministrazione", "Viene licenziato automaticamente senza preavviso", "Paga una multa di 500 euro", "Non subisce conseguenze se il lavoro era gratuito"], correct: 0, explanation: "L'art. 53 c. 7 prevede il versamento del compenso indebito nel fondo di produttività, oltre alla responsabilità disciplinare." },
+            { id: 43, difficulty: 'hard', section: 'generale', category: 'Diritto Penale', text: "Il reato di 'Traffico di influenze illecite' (346-bis c.p.) si consuma:", options: ["Sia ricevendo denaro per mediare illecitamente, sia promettendolo al mediatore", "Solo quando il Pubblico Ufficiale accetta la tangente", "Solo se la mediazione ha successo effettivo", "Esclusivamente da parte del Pubblico Ufficiale"], correct: 0, explanation: "Il reato punisce sia chi sfrutta le relazioni (mediatore) per farsi dare utilità, sia il privato che dà o promette denaro per la mediazione illecita." },
+            { id: 44, difficulty: 'hard', section: 'specifica', category: 'Patrimonio Culturale', text: "La 'Dichiarazione di notevole interesse pubblico' paesaggistico (art. 136-141 D.Lgs 42/2004) può avere ad oggetto:", options: ["Le bellezze panoramiche considerate come quadri naturali e così pure quei punti di vista o di belvedere", "Qualsiasi area verde urbana", "Solo i parchi nazionali", "Esclusivamente le zone costiere"], correct: 0, explanation: "L'art. 136 lettera d) include le bellezze panoramiche e i punti di vista o di belvedere accessibili al pubblico." },
+            { id: 45, difficulty: 'hard', section: 'specifica', category: 'Sicurezza 81/08', text: "Il 'Piano di Sicurezza e Coordinamento' (PSC) nei cantieri temporanei o mobili è obbligatorio:", options: ["Quando è prevista la presenza di più imprese esecutrici, anche non contemporanea", "Sempre, per qualsiasi lavoro edile", "Solo se l'importo lavori supera 1.000.000 euro", "Solo se ci sono più di 200 uomini-giorno"], correct: 0, explanation: "Art. 90 c. 3 D.Lgs 81/08: nei cantieri in cui è prevista la presenza di più imprese esecutrici, anche non contemporanea." }
+        ];
+
+        // --- UTILITY ---
+        const shuffleArray = (array) => {
+            const newArray = [...array];
+            for (let i = newArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+            }
+            return newArray;
+        };
+
+        const shuffleOptions = (question) => {
+            const indices = question.options.map((_, i) => i);
+            const shuffledIndices = shuffleArray(indices);
+            const newOptions = shuffledIndices.map(index => question.options[index]);
+            const newCorrect = shuffledIndices.indexOf(question.correct);
+            return { ...question, options: newOptions, correct: newCorrect };
+        };
+
+        // --- COMPONENTE APP ---
+        function App() {
+            const [gameState, setGameState] = useState('menu'); 
+            const [selectedDifficulty, setSelectedDifficulty] = useState(null); 
+            const [currentQuestions, setCurrentQuestions] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [score, setScore] = useState(0);
+            const [showFeedback, setShowFeedback] = useState(false);
+            const [selectedOption, setSelectedOption] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [timer, setTimer] = useState(0);
+
+            useEffect(() => {
+                let interval;
+                if (gameState === 'playing') {
+                    interval = setInterval(() => {
+                        setTimer((prev) => prev + 1);
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [gameState]);
+
+            const formatTime = (seconds) => {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            };
+
+            const startGame = (difficultyLevel) => {
+                let pool = databaseDomande.filter(q => q.difficulty === difficultyLevel);
+                // Simulazione di più domande duplicando se poche (per demo)
+                if (pool.length < 5) pool = [...pool, ...pool, ...pool].slice(0, 10);
+                
+                const gameQuestions = shuffleArray(pool).map(shuffleOptions);
+                setCurrentQuestions(gameQuestions);
+                setSelectedDifficulty(difficultyLevel);
+                setCurrentIndex(0);
+                setScore(0);
+                setHistory([]);
+                setTimer(0);
+                setShowFeedback(false);
+                setSelectedOption(null);
+                setGameState('playing');
+            };
+
+            const handleAnswer = (optionIndex) => {
+                if (showFeedback) return;
+                setSelectedOption(optionIndex);
+                setShowFeedback(true);
+                
+                const isCorrect = optionIndex === currentQuestions[currentIndex].correct;
+                if (isCorrect) setScore(prev => prev + 1);
+                
+                setHistory(prev => [...prev, {
+                    question: currentQuestions[currentIndex],
+                    userAnswer: optionIndex,
+                    isCorrect
+                }]);
+            };
+
+            const nextQuestion = () => {
+                if (currentIndex < currentQuestions.length - 1) {
+                    setCurrentIndex(prev => prev + 1);
+                    setShowFeedback(false);
+                    setSelectedOption(null);
+                } else {
+                    setGameState('results');
+                }
+            };
+
+            const getThemeClass = (type) => {
+                if(selectedDifficulty === 'easy') return type === 'bg' ? 'bg-emerald-600' : 'text-emerald-600';
+                if(selectedDifficulty === 'medium') return type === 'bg' ? 'bg-blue-600' : 'text-blue-600';
+                return type === 'bg' ? 'bg-violet-600' : 'text-violet-600';
+            }
+
+            // --- VISTE ---
+            
+            // MENU
+            if (gameState === 'menu') {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+                        <div className="max-w-4xl w-full">
+                            <div className="text-center mb-10">
+                                <div className="bg-blue-900 w-20 h-20 rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-lg shadow-blue-900/30">
+                                    <Landmark className="w-10 h-10 text-white" />
+                                </div>
+                                <h1 className="text-4xl font-extrabold text-slate-900 mb-2">Simulatore Concorso MiC</h1>
+                                <p className="text-slate-500 text-lg">Seleziona il livello di competenza per iniziare la simulazione.</p>
+                            </div>
+
+                            <div className="grid md:grid-cols-3 gap-6">
+                                {/* Principiante */}
+                                <button onClick={() => startGame('easy')} className="group relative bg-white p-8 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-slate-200 hover:border-emerald-400 text-left overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><Star className="w-24 h-24 text-emerald-600" /></div>
+                                    <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><Star className="w-6 h-6 text-emerald-600" /></div>
+                                    <h3 className="text-xl font-bold text-slate-800 mb-2">Principiante</h3>
+                                    <p className="text-sm text-slate-500 mb-4 leading-relaxed">Ideale per chi inizia. Nozioni base e scadenze.</p>
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 w-fit px-3 py-1 rounded-full"><CheckCircle className="w-3 h-3" /> Bassa Complessità</div>
+                                </button>
+                                {/* Avanzato */}
+                                <button onClick={() => startGame('medium')} className="group relative bg-white p-8 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-slate-200 hover:border-blue-400 text-left overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><GraduationCap className="w-24 h-24 text-blue-600" /></div>
+                                    <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><GraduationCap className="w-6 h-6 text-blue-600" /></div>
+                                    <h3 className="text-xl font-bold text-slate-800 mb-2">Avanzato</h3>
+                                    <p className="text-sm text-slate-500 mb-4 leading-relaxed">Per chi ha già studiato. Procedure ed eccezioni.</p>
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-blue-700 bg-blue-50 w-fit px-3 py-1 rounded-full"><BookOpen className="w-3 h-3" /> Media Complessità</div>
+                                </button>
+                                {/* Esperto */}
+                                <button onClick={() => startGame('hard')} className="group relative bg-white p-8 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-slate-200 hover:border-violet-400 text-left overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><BrainCircuit className="w-24 h-24 text-violet-600" /></div>
+                                    <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><BrainCircuit className="w-6 h-6 text-violet-600" /></div>
+                                    <h3 className="text-xl font-bold text-slate-800 mb-2">Esperto</h3>
+                                    <p className="text-sm text-slate-500 mb-4 leading-relaxed">Dettagli fini, Codice Appalti e casi limite.</p>
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-violet-700 bg-violet-50 w-fit px-3 py-1 rounded-full"><Shield className="w-3 h-3" /> Alta Complessità</div>
+                                </button>
+                            </div>
+                            <p className="text-center text-slate-400 text-xs mt-12">Database aggiornato al D.Lgs 36/2023</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // RISULTATI
+            if (gameState === 'results') {
+                const passed = (score / currentQuestions.length) >= 0.6;
+                return (
+                    <div className="min-h-screen py-8 px-4">
+                        <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+                            <div className={`p-8 text-center text-white ${passed ? 'bg-emerald-600' : 'bg-red-500'}`}>
+                                {passed ? <Award className="w-16 h-16 mx-auto mb-4" /> : <XCircle className="w-16 h-16 mx-auto mb-4" />}
+                                <h2 className="text-3xl font-bold mb-2">{passed ? 'Test Superato!' : 'Non Superato'}</h2>
+                                <p className="text-xl opacity-90">Punteggio: {score} su {currentQuestions.length}</p>
+                                <div className="mt-2 text-sm opacity-80 flex items-center justify-center gap-2"><Clock className="w-4 h-4" /> Tempo: {formatTime(timer)}</div>
+                            </div>
+                            <div className="p-8 bg-slate-50">
+                                <h3 className="font-bold text-gray-800 text-xl mb-6">Analisi Risposte</h3>
+                                <div className="space-y-4">
+                                    {history.map((item, idx) => (
+                                        <div key={idx} className={`p-4 rounded-lg border bg-white ${item.isCorrect ? 'border-emerald-200' : 'border-red-200'}`}>
+                                            <p className="text-xs font-bold uppercase text-slate-400 mb-1">Domanda {idx + 1}</p>
+                                            <p className="font-medium text-gray-800 mb-2">{item.question.text}</p>
+                                            <div className="text-sm space-y-1">
+                                                <div className={`flex items-center gap-2 ${item.isCorrect ? 'text-emerald-700' : 'text-red-700'}`}>
+                                                    {item.isCorrect ? <CheckCircle className="w-4 h-4"/> : <XCircle className="w-4 h-4"/>}
+                                                    <span className="font-semibold">Tua risposta:</span> {item.question.options[item.userAnswer]}
+                                                </div>
+                                                {!item.isCorrect && (
+                                                    <div className="flex items-center gap-2 text-emerald-700">
+                                                        <CheckCircle className="w-4 h-4"/>
+                                                        <span className="font-semibold">Corretta:</span> {item.question.options[item.question.correct]}
+                                                    </div>
+                                                )}
+                                                <p className="text-slate-500 text-xs mt-2 pl-4 border-l-2 border-slate-200 italic">{item.question.explanation}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={() => setGameState('menu')} className="w-full mt-8 py-4 bg-slate-800 text-white rounded-xl font-semibold hover:bg-slate-700 transition-colors flex items-center justify-center gap-2">
+                                    <RefreshCw className="w-5 h-5" /> Torna al Menu
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // GIOCO
+            const currentQ = currentQuestions[currentIndex];
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-4">
+                    <div className="max-w-2xl w-full">
+                        <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider text-white ${getThemeClass('bg')}`}>
+                                    {selectedDifficulty === 'easy' ? 'Principiante' : selectedDifficulty === 'medium' ? 'Avanzato' : 'Esperto'}
+                                </span>
+                                <span className="text-slate-400 text-sm font-medium">Domanda {currentIndex + 1} / {currentQuestions.length}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
+                                <Clock className="w-4 h-4"/> {formatTime(timer)}
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-xl overflow-hidden animate-in">
+                            <div className="p-8">
+                                <h2 className="text-xl font-bold text-slate-800 mb-8 leading-relaxed">{currentQ.text}</h2>
+                                <div className="space-y-3">
+                                    {currentQ.options.map((option, idx) => {
+                                        let statusClass = "border-slate-100 hover:bg-slate-50 text-slate-600";
+                                        if (showFeedback) {
+                                            if (idx === currentQ.correct) statusClass = "border-emerald-500 bg-emerald-50 text-emerald-900 font-medium";
+                                            else if (idx === selectedOption) statusClass = "border-red-500 bg-red-50 text-red-900";
+                                            else statusClass = "border-slate-100 opacity-50";
+                                        }
+                                        return (
+                                            <button key={idx} onClick={() => handleAnswer(idx)} disabled={showFeedback} className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-200 flex items-center gap-4 ${statusClass}`}>
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${showFeedback && idx === currentQ.correct ? 'bg-emerald-200 text-emerald-800' : 'bg-slate-200 text-slate-500'}`}>{String.fromCharCode(65 + idx)}</div>
+                                                {option}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {showFeedback && (
+                                    <div className="mt-8 animate-in">
+                                        <div className="bg-slate-50 border-l-4 border-slate-800 p-4 mb-6">
+                                            <h4 className="font-bold text-slate-900 mb-1">Spiegazione:</h4>
+                                            <p className="text-slate-700 text-sm">{currentQ.explanation}</p>
+                                        </div>
+                                        <button onClick={nextQuestion} className={`w-full py-4 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95 ${getThemeClass('bg')}`}>
+                                            {currentIndex < currentQuestions.length - 1 ? 'Prossima Domanda' : 'Vedi Risultati'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="h-1 bg-slate-100 w-full">
+                                <div className={`h-full transition-all duration-500 ${getThemeClass('bg')}`} style={{ width: `${((currentIndex + 1) / currentQuestions.length) * 100}%` }}/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
